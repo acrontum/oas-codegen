@@ -1,4 +1,4 @@
-import { camelCase } from 'oas-typegen';
+import { camelCase } from '@acrontum/oas-codegen-parser';
 import {
   ClassDeclaration,
   DecoratableNode,

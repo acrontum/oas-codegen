@@ -1,4 +1,4 @@
-import { TypeGenMethod, camelCase } from 'oas-typegen';
+import { TypeGenMethod, camelCase } from '@acrontum/oas-codegen-parser';
 import { join } from 'path';
 import { Config } from './config';
 import { capitalize, dashCase, pascalCase } from './string-utils';
