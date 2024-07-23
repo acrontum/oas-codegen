@@ -1,0 +1,41 @@
+{
+  "name": "oas-nestgen",
+  "version": "1.0.1",
+  "description": "",
+  "repository": "https://github.com/acrontum/oas-codegen/",
+  "main": "dist/oas-nestgen.js",
+  "bin": {
+    "oas-nestgen": "dist/cli.js"
+  },
+  "scripts": {
+    "prebuild": "rm -rf dist",
+    "build": "tsc",
+    "lint": "prettier --write 'src/*'",
+    "test": "node -r source-map-support/register dist/cli.js -c oasn.js",
+    "version": "npm verison --no-commit-hooks --no-git-tag-version",
+    "setup": "git config core.hooksPath ./githooks",
+    "docs": "npm run docs-readme && npm run docs-changelog",
+    "docs-readme": "npx doctoc --github readme.md && sed -i 's/%5C_/_/g' readme.md",
+    "docs-changelog": "npx auto-changelog --output changelog.md --commit-limit false --sort-commits date --hide-empty-releases --ignore-commit-pattern 'release' --breaking-pattern 'breaking change: '"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@nestjs/common": "^10.2.10",
+    "@types/node": "^20.10.5",
+    "auto-changelog": "^2.4.0",
+    "prettier": "^3.1.0",
+    "source-map-support": "^0.5.21",
+    "tsc-watch": "^6.0.4",
+    "typescript": "^5.2.2"
+  },
+  "dependencies": {
+    "oas-codegen-parser": "^1.0.0",
+    "ts-morph": "^20.0.0"
+  },
+  "files": [
+    "dist/",
+    "readme.md"
+  ]
+}

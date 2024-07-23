@@ -1,0 +1,31 @@
+{
+  "name": "oas-codegen-parser",
+  "version": "1.0.0",
+  "description": "OpenAPI schema parser / mapper for codegen tools",
+  "repository": "https://github.com/acrontum/oas-codegen/",
+  "main": "dist/typegen.js",
+  "bin": {
+    "oas-codegen-parser": "dist/typegen.js",
+    "ocp": "dist/typegen.js"
+  },
+  "scripts": {
+    "prebuild": "rm -rf dist",
+    "build": "tsc",
+    "format": "npx prettier --print-width 130 --write '**/*.ts'"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@tsconfig/node18": "^2.0.1",
+    "@types/node": "^20.2.5",
+    "openapi-types": "^12.1.3",
+    "source-map-support": "^0.5.21",
+    "typescript": "^5.1.3"
+  },
+  "files": [
+    "dist/*.js",
+    "dist/*.d.ts",
+    "readme.md"
+  ]
+}
