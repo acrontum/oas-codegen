@@ -36,4 +36,6 @@ Nestjs codegen lib. Parses the output of oas-codegen-parser and uses the [typesc
 
 ### [demo](./demo/apps/backend/)
 
+**Coming soon**
+
 Bare-minimal nestjs codegen example using typegen to create [typings and validation](https://docs.nestjs.com/techniques/validation) which are used in the output modules.
