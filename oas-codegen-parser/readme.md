@@ -1,3 +1,14 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
+
+- [Typegen](#typegen)
+  - [Install](#install)
+  - [Quickstart](#quickstart)
+  - [Examples](#examples)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # Typegen
 
 OpenAPI schema parser / mapper for codegen tools. Walks an opanpi v3 schema and produces an intermediate schema for consumption by generators (not included).  
