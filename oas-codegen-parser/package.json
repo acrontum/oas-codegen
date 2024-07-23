@@ -1,8 +1,12 @@
 {
-  "name": "oas-codegen-parser",
+  "name": "@acrontum/oas-codegen-parser",
   "version": "1.0.0",
   "description": "OpenAPI schema parser / mapper for codegen tools",
-  "repository": "https://github.com/acrontum/oas-codegen/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/acrontum/oas-codegen.git",
+    "directory": "oas-codegen-parser"
+  },
   "main": "dist/typegen.js",
   "bin": {
     "oas-codegen-parser": "dist/typegen.js",

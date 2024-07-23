@@ -1,8 +1,12 @@
 {
-  "name": "oas-nestgen",
+  "name": "@acrontum/oas-nestgen",
   "version": "1.0.1",
   "description": "",
-  "repository": "https://github.com/acrontum/oas-codegen/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/acrontum/oas-codegen.git",
+    "directory": "oas-nestgen"
+  },
   "main": "dist/oas-nestgen.js",
   "bin": {
     "oas-nestgen": "dist/cli.js"
@@ -31,7 +35,7 @@
     "typescript": "^5.2.2"
   },
   "dependencies": {
-    "oas-codegen-parser": "^1.0.0",
+    "@acrontum/oas-codegen-parser": "^1.0.0",
     "ts-morph": "^20.0.0"
   },
   "files": [
