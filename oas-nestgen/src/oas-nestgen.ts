@@ -2,6 +2,7 @@ import { dirname, join, relative } from 'path';
 import { Project } from 'ts-morph';
 import {
   createProject,
+  Modification,
   modifyAppModule,
   modifyController,
   modifyModule,
@@ -9,11 +10,12 @@ import {
   modifyService,
 } from './ast-parsing';
 import { Config } from './config';
-import { assertFileFromTemplate } from './file-utils';
-import { Method, Module, getTypesToGen } from './parse-typegen';
+import './console-patch';
+import { assertFileFromTemplate, exists } from './file-utils';
+import { getTypesToGen, Method, Module } from './parse-typegen';
 import { getController, getModule, getOpIdDecorator, getService } from './templates';
 
-type Change = 'created' | 'changed' | null;
+type Change = { summary: 'created' | 'changed' | null; path: string };
 type Details<T = Module> = {
   project: Project;
   config: Config;
@@ -34,90 +36,74 @@ const colours: Record<string, string> = {
 };
 const colour = nocolour ? (str: string) => str : (str: string) => `${colours[str]}${str}${colours.reset}`;
 
-const assertOpIdFile = async (opIdDecoratorPath: string, details: Details<null>, opIds: string[]): Promise<Change> => {
-  const opIdCreated = await assertFileFromTemplate({ path: opIdDecoratorPath, content: getOpIdDecorator(opIds) });
+const assertProjectFile = async <T extends Modification>(
+  details: Details<unknown>,
+  content: string,
+  filePath: string,
+  getResult: () => Promise<T>,
+): Promise<{ result: T; change: Change }> => {
+  const { project, config } = details;
+
+  const opIdCreated = await assertFileFromTemplate({ path: filePath, content });
   if (opIdCreated) {
-    changes[opIdDecoratorPath] = 'created';
+    changes[filePath] = { summary: 'created', path: filePath };
   }
 
-  const result = await modifyOpIdDecorator(details.project, opIdDecoratorPath, opIds).catch((e) => {
-    if (details.config.dryRun && e?.constructor?.name === 'FileNotFoundError') {
-      changes[opIdDecoratorPath] = 'created';
+  if (config.dryRun && !(await exists(filePath))) {
+    project.createSourceFile(filePath, content);
+  }
 
-      return { changed: true };
-    }
-
-    throw e;
-  });
-
+  const result = await getResult();
   if (result.changed) {
-    changes[opIdDecoratorPath] ||= 'changed';
+    changes[filePath] ||= { summary: 'changed', path: filePath };
   }
 
-  return changes[opIdDecoratorPath];
+  return { result, change: changes[filePath] };
+};
+
+const assertOpIdFile = async (opIdDecoratorPath: string, details: Details<null>, opIds: string[]): Promise<Change> => {
+  const { project } = details;
+  const content = getOpIdDecorator(opIds);
+
+  const { change } = await assertProjectFile(details, content, opIdDecoratorPath, () =>
+    modifyOpIdDecorator(project, opIdDecoratorPath, opIds),
+  );
+
+  return change;
 };
 
 const assertModule = async (modulePath: string, details: Details, addService: boolean): Promise<Change> => {
-  const { module: mod, config, project } = details;
+  const { module: mod, project } = details;
+  const content = getModule(mod.service.name);
 
-  const moduleCreated = await assertFileFromTemplate({ path: modulePath, content: getModule(mod.service.name) });
-  if (moduleCreated) {
-    changes[modulePath] = 'created';
-  }
-  const result = await modifyModule(project, mod, modulePath, addService).catch((e) => {
-    if (config.dryRun && e?.constructor?.name === 'FileNotFoundError') {
-      changes[modulePath] = 'created';
+  const { change } = await assertProjectFile(details, content, modulePath, () =>
+    modifyModule(project, mod, modulePath, addService),
+  );
 
-      return { changed: true };
-    }
-
-    throw e;
-  });
-  if (result.changed) {
-    changes[modulePath] ||= 'changed';
-  }
-
-  return changes[modulePath];
+  return change;
 };
 
 const assertController = async (controllerPath: string, details: Details): Promise<Method[]> => {
-  const { module: mod, config, project } = details;
+  const { module: mod, project } = details;
 
-  const ctrlCreated = await assertFileFromTemplate({ path: controllerPath, content: getController(mod.controller.name) });
-  if (ctrlCreated) {
-    changes[controllerPath] = 'created';
-  }
+  const content = getController(mod.controller.name);
 
-  const result = await modifyController(project, mod, controllerPath).catch((e) => {
-    if (config.dryRun && e?.constructor?.name === 'FileNotFoundError') {
-      changes[controllerPath] = 'created';
-
-      return { changed: true, serviceMethods: [] };
-    }
-
-    throw e;
-  });
-  if (result.changed) {
-    changes[controllerPath] ||= 'changed';
-  }
+  const { result } = await assertProjectFile(details, content, controllerPath, () =>
+    modifyController(project, mod, controllerPath),
+  );
 
   return result.serviceMethods;
 };
 
 const assertService = async (servicePath: string, details: Details, serviceMethods: Method[]): Promise<Change> => {
-  const { module: mod, project } = details;
+  const { module: mod, config, project } = details;
+  const content = getService(mod.service.name);
 
-  const serviceCreated = await assertFileFromTemplate({ path: servicePath, content: getService(mod.service.name) });
-  if (serviceCreated) {
-    changes[servicePath] = 'created';
-  }
+  const { change } = await assertProjectFile(details, content, servicePath, () =>
+    modifyService(project, mod, servicePath, serviceMethods),
+  );
 
-  const result = await modifyService(project, mod, servicePath, serviceMethods);
-  if (result.changed) {
-    changes[servicePath] ||= 'changed';
-  }
-
-  return changes[servicePath];
+  return change;
 };
 
 const assertAppModule = async (
@@ -125,26 +111,14 @@ const assertAppModule = async (
   details: Details<null>,
   appModuleChanges: Record<string, string>,
 ): Promise<Change> => {
-  const { config, project } = details;
+  const { project } = details;
+  const content = getModule('App');
 
-  const moduleCreated = await assertFileFromTemplate({ path: appModulePath, content: getModule('App') });
-  if (moduleCreated) {
-    changes[appModulePath] = 'created';
-  }
-  const { changed } = await modifyAppModule(project, appModulePath, appModuleChanges).catch((e) => {
-    if (config.dryRun && e?.constructor?.name === 'FileNotFoundError') {
-      changes[appModulePath] = 'created';
+  const { change } = await assertProjectFile(details, content, appModulePath, () =>
+    modifyAppModule(project, appModulePath, appModuleChanges),
+  );
 
-      return { changed: true };
-    }
-
-    throw e;
-  });
-  if (changed) {
-    changes[config.appModulePath] ||= 'changed';
-  }
-
-  return changes[config.appModulePath];
+  return change;
 };
 
 const generateModule = async (
@@ -154,21 +128,22 @@ const generateModule = async (
   appModuleChanges: Record<string, string>,
 ): Promise<void> => {
   const details = { project, module: mod, config };
-
   const folder = mod.fileName.replace('.module.ts', '');
 
   const controllerPath = join(config.modulesPath, folder, mod.controller.fileName);
   const serviceMethods = await assertController(controllerPath, details);
 
   let addService = false;
+  const servicePath = join(config.modulesPath, folder, mod.service.fileName);
   if (config.stubService && serviceMethods?.length) {
     addService = true;
-    const servicePath = join(config.modulesPath, folder, mod.service.fileName);
     await assertService(servicePath, details, serviceMethods);
+  } else if (config.stubService && changes[controllerPath]?.summary === 'created') {
+    changes[servicePath] ||= { summary: 'created', path: servicePath };
   }
 
   const modulePath = join(config.modulesPath, folder, mod.fileName);
-  if ((await assertModule(modulePath, details, addService)) === 'created') {
+  if ((await assertModule(modulePath, details, addService))?.summary === 'created') {
     let relpath = relative(dirname(config.appModulePath), modulePath);
     if (relpath[0] !== '.' && relpath[0] !== '/') {
       relpath = `./${relpath}`;
@@ -196,7 +171,7 @@ export const generate = async (config: Config) => {
 
   await assertAppModule(config.appModulePath, { project, config, module: null }, appModuleChanges);
 
-  if (!config.dryRun && Object.keys(changes)?.length) {
+  if (Object.keys(changes)?.length && !config.dryRun) {
     await project.save();
   }
 
@@ -207,7 +182,14 @@ export const generate = async (config: Config) => {
 
   for (const key of keys) {
     if (changes[key]) {
-      console.log(`${colour(changes[key] as string)}:  ${key}`);
+      console.log(`${colour(changes[key].summary as string)}:  ${key}`);
+      if (config.verbose) {
+        console.log(project.getSourceFile(changes[key].path)?.getFullText(), '\n');
+      }
     }
+  }
+
+  if (config.dryRun) {
+    console.log('- no files were harmed in the running of this command (dry-run) -');
   }
 };

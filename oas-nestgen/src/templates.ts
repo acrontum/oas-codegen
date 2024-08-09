@@ -1,3 +1,5 @@
+import { config } from './config';
+
 export const getController = (name: string) => `\
 export class ${name}Controller {}
 `;
@@ -21,10 +23,19 @@ import { Injectable } from '@nestjs/common';
 export class ${name}Service {}
 `;
 
+export const formatOpidType = (opIds: string[], indent = config.indent) => {
+  let opIdExport = `'${opIds.join("' | '")}'`;
+  if (opIdExport?.length > config.maxLineLength) {
+    opIdExport = `\n${indent}| '${opIds.join(`'\n${indent}| '`)}'`;
+  }
+
+  return opIdExport;
+};
+
 export const getOpIdDecorator = (opIds: string[]) => `\
 import { CustomDecorator, SetMetadata } from '@nestjs/common';
 
 export const OP_ID = 'OperationId';
-export type OperationId = '${opIds.join("' | '")}';
+export type OperationId = ${formatOpidType(opIds)};
 export const OpId = (id: OperationId): CustomDecorator => SetMetadata(OP_ID, id);
 `;

@@ -7,6 +7,7 @@ import {
   ImportDeclaration,
   IndentationText,
   MethodDeclaration,
+  ModuledNode,
   ObjectLiteralExpression,
   OptionalKind,
   ParameterDeclaration,
@@ -20,10 +21,15 @@ import {
 import { config } from './config';
 import { Method, Module, Parameter, Decorator as TypegenDecorator } from './parse-typegen';
 import { dashCase } from './string-utils';
+import { formatOpidType } from './templates';
 
 type DecoratorWithTodo = TypegenDecorator & { task: 'create' | 'update'; decoratorNode?: Decorator };
-type ImportMap = Record<string, Set<string>>;
-type Modification = { changed: boolean };
+type ImportMapDeclaration = Parameters<ModuledNode['addImportDeclarations']>[0][number];
+interface ImportMap {
+  format: () => ImportMapDeclaration[];
+  list: Record<string, Set<string> & { _namespace?: string }>;
+}
+export type Modification = { changed: boolean };
 export type ServiceMethod = Pick<Method, 'name' | 'returnType' | 'imports'>;
 
 const methodDecorators = {
@@ -38,9 +44,100 @@ const methodDecorators = {
   Search: true,
 } as const;
 
+const addImports = (imports: ImportMap, sets: [string, string][]) => {
+  for (const [from, what] of sets) {
+    addImport(imports, from, what);
+  }
+};
+
 const addImport = (imports: ImportMap, from: string, what: string) => {
-  imports[from] ||= new Set<string>();
-  imports[from].add(what);
+  imports.list[from] ||= new Set<string>();
+  imports.list[from].add(what);
+};
+
+const dotLastAlphaSorting = (a: string, b: string) => {
+  if (a[0] == '.' && b[0] !== '.') {
+    return 1;
+  }
+
+  if (b[0] == '.' && a[0] !== '.') {
+    return -1;
+  }
+
+  return a.localeCompare(b);
+};
+
+const updateImports = (source: SourceFile | undefined, imports: ImportMap, remove = true) => {
+  if (!source) {
+    return;
+  }
+
+  if (remove) {
+    source.getImportDeclarations().forEach((node) => node.remove());
+  }
+
+  const toImport = imports.format();
+  source.addImportDeclarations(toImport);
+};
+
+const getImportMap = (imports: ImportDeclaration[]): ImportMap => {
+  const mapped: ImportMap = {
+    list: {},
+    format: () => {
+      let formatted: ImportMapDeclaration[] = [];
+      const moduleSpecifiers = Object.keys(mapped.list).sort(dotLastAlphaSorting);
+
+      for (const moduleSpecifier of moduleSpecifiers) {
+        const preview = `import { ${[...mapped.list[moduleSpecifier].values()].sort().join(', ')} } from '${moduleSpecifier}';`;
+        let prepend = '';
+        if (preview.length >= config.maxLineLength) {
+          prepend = '\n';
+        }
+        const namedImports = [...mapped.list[moduleSpecifier].values()].sort().map((x) => `${prepend}${x}`);
+        if (prepend) {
+          namedImports.push('\n');
+        }
+
+        if (mapped.list[moduleSpecifier]?._namespace) {
+          formatted.push({
+            moduleSpecifier,
+            isTypeOnly: false,
+            namespaceImport: mapped.list[moduleSpecifier]._namespace,
+          });
+        }
+
+        formatted.push({
+          moduleSpecifier,
+          isTypeOnly: false,
+          namedImports,
+        });
+      }
+
+      return formatted;
+    },
+  };
+
+  for (const imp of imports) {
+    const from = imp.getModuleSpecifierValue();
+    mapped.list[from] ||= new Set<string>();
+
+    const namespace = imp.getNamespaceImport()?.getText();
+    if (namespace) {
+      mapped.list[from]._namespace = namespace;
+    }
+
+    const defaultImport = imp.getDefaultImport()?.getText();
+    if (defaultImport) {
+      mapped.list[from].add(`default as ${defaultImport}`);
+    }
+
+    const namedImports = imp.getNamedImports()?.map((n) => n.getText()) || [];
+    for (const named of namedImports) {
+      mapped.list[from].add(named);
+    }
+  }
+
+  return mapped;
 };
 
 const convertDecorators = (from: TypegenDecorator[]): OptionalKind<DecoratorStructure>[] => {
@@ -106,33 +203,6 @@ const applyDecoratorChanges = (
   return changed;
 };
 
-const getImportMap = (imports: ImportDeclaration[]): ImportMap => {
-  const mapped: ImportMap = {};
-
-  for (const imp of imports) {
-    const from = imp.getModuleSpecifierValue();
-    mapped[from] ||= new Set<string>();
-
-    // technically not correct, import * as whatever from wherever works when there is no export default...
-    const namespace = imp.getNamespaceImport()?.getText();
-    if (namespace) {
-      mapped[from].add(`default as ${namespace}`);
-    }
-
-    const defaultImport = imp.getDefaultImport()?.getText();
-    if (defaultImport) {
-      mapped[from].add(`default as ${defaultImport}`);
-    }
-
-    const namedImports = imp.getNamedImports()?.map((n) => n.getText()) || [];
-    for (const named of namedImports) {
-      mapped[from].add(named);
-    }
-  }
-
-  return mapped;
-};
-
 const assertClass = (source: SourceFile | undefined, name: string): ClassDeclaration => {
   let ctrl = source?.getClasses()?.[0];
   if (ctrl) {
@@ -146,32 +216,6 @@ const assertClass = (source: SourceFile | undefined, name: string): ClassDeclara
   }
 
   return ctrl;
-};
-
-const dotLastAlphaSorting = (a: string, b: string) => {
-  if (a[0] == '.' && b[0] !== '.') {
-    return 1;
-  }
-
-  if (b[0] == '.' && a[0] !== '.') {
-    return -1;
-  }
-
-  return a.localeCompare(b);
-};
-
-const updateImports = (source: SourceFile | undefined, imports: ImportMap, remove = true) => {
-  if (remove) {
-    source?.getImportDeclarations().forEach((node) => node.remove());
-  }
-
-  const toImport = Object.keys(imports)
-    .sort(dotLastAlphaSorting)
-    .map((moduleSpecifier) => ({
-      namedImports: [...imports[moduleSpecifier].values()].sort(),
-      moduleSpecifier,
-    }));
-  source?.addImportDeclarations(toImport);
 };
 
 const applyParameterChanges = (
@@ -233,8 +277,9 @@ const assertMethod = (
     if (config.stubService && serviceName) {
       existing = klass.addMethod({ name: method.name, statements: [`return this.${serviceName}.${method.name}();`] });
     } else {
-      existing = klass.addMethod({ name: method.name, statements: ['throw new NotImplementedException();'] });
-      addImport(imports, '@nestjs/common', 'NotImplementedException');
+      const { statements, imports: importList } = config.getDefaultServiceContent(method);
+      existing = klass.addMethod({ name: method.name, statements });
+      addImports(imports, importList);
     }
     changed = 'created';
   }
@@ -311,17 +356,25 @@ export const modifyOpIdDecorator = async (
   const decoratorSource = project.getSourceFile(opIdDecoratorPath);
 
   const sorted = opIds.slice().sort();
+  const opIdType = formatOpidType(sorted, '');
+
   const typeAlias = decoratorSource?.getTypeAlias('OperationId');
+  if (!typeAlias) {
+    decoratorSource?.addTypeAlias({ name: 'OperationId', type: opIdType, isExported: true });
+
+    return { changed: true };
+  }
+
   const desired = `,${sorted.join(',')}`;
-  const existing = (typeAlias?.getStructure().type as string)
-    .split(/['" |\n]+/)
+  const existing = (typeAlias.getStructure().type as string)
+    ?.split(/['" |\n]+/)
     .sort()
     .reduce((all, opid) => (opid ? `${all},${opid}` : all));
   if (existing === desired) {
     return { changed: false };
   }
 
-  typeAlias?.setType(sorted.map((o) => `'${o}'`).join(' | '));
+  typeAlias.setType(opIdType.replace(/^\n+/, ''));
 
   return { changed: true };
 };
@@ -447,7 +500,7 @@ export const modifyService = async (
   }
 
   for (const method of methods) {
-    const serviceMethod = {
+    const serviceMethod: Method = {
       name: method.name,
       returnType: method.returnType,
       imports: method.imports,
@@ -456,6 +509,7 @@ export const modifyService = async (
       controllerName: '',
       url: '',
       opid: '',
+      typegenMethod: method.typegenMethod,
     };
     const methodAdded = assertMethod(ctrl, serviceMethod, existingMethods[serviceMethod.name], imports, null);
     if (methodAdded.changed !== null) {

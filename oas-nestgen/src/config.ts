@@ -4,6 +4,7 @@ import {
   extraDecorators,
   getBodyParams,
   getControllerDecorators,
+  getDefaultServiceContent,
   getMethodControllerName,
   getMethodName,
   getReturnValue,
@@ -19,6 +20,7 @@ export type Config = {
   typegenPath: string;
   stubService: boolean;
   dryRun: boolean;
+  verbose: boolean;
 
   appModulePath: string;
   modulesPath: string;
@@ -28,6 +30,9 @@ export type Config = {
   typesImport: string;
 
   ignoredOpIds: string[] | null;
+
+  maxLineLength: number;
+  indent: string;
 
   getMethodName: typeof getMethodName;
   getReturnValue: typeof getReturnValue;
@@ -40,6 +45,7 @@ export type Config = {
   getSubPath: typeof getSubPath;
   getBodyParams: typeof getBodyParams;
   getControllerDecorators: typeof getControllerDecorators;
+  getDefaultServiceContent: typeof getDefaultServiceContent;
 };
 
 export const config: Config = {
@@ -47,6 +53,7 @@ export const config: Config = {
   typegenPath: 'typegen.json',
   stubService: true,
   dryRun: false,
+  verbose: false,
 
   appModulePath: './src/app.module.ts',
   modulesPath: './src/modules/',
@@ -56,6 +63,9 @@ export const config: Config = {
   typesImport: 'src/types',
 
   ignoredOpIds: null,
+
+  maxLineLength: 210,
+  indent: '  ',
 
   getMethodName,
   getReturnValue,
@@ -68,6 +78,7 @@ export const config: Config = {
   getSubPath,
   getBodyParams,
   getControllerDecorators,
+  getDefaultServiceContent,
 };
 
 export const getConfig = async (overrides: Partial<Config> = {}) => {

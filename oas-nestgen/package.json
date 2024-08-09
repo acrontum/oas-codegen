@@ -35,11 +35,12 @@
     "typescript": "^5.2.2"
   },
   "dependencies": {
-    "@acrontum/oas-codegen-parser": "^1.0.0",
+    "@acrontum/oas-codegen-parser": "^1.2.0",
     "ts-morph": "^20.0.0"
   },
   "files": [
-    "dist/",
+    "dist/**/*.ts",
+    "dist/**/*.d.ts",
     "readme.md"
   ]
 }

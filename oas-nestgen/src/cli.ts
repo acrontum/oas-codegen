@@ -2,6 +2,7 @@
 
 import { parseArgs, ParseArgsConfig } from 'node:util';
 import { config, Config, getConfig } from './config';
+import './console-patch';
 import { generate } from './oas-nestgen';
 import { camelCase } from './string-utils';
 
@@ -35,6 +36,9 @@ const configArgs: Record<ConfigKeys | CliExclusiveArgs, CliArg> = {
     multiple: true,
     [description]: 'Ignore changes for opId (can be invoked multiple times)',
   },
+  'max-line-length': { type: 'string', short: 'L', [description]: 'Show this menu' },
+  'indent': { type: 'string', short: 'n', default: '  ', [description]: 'Indent to use when formatting code' },
+  'verbose': { type: 'boolean', short: 'v', [description]: 'Print file changes when dry-run is true' },
   'help': { type: 'boolean', short: 'h', [description]: 'Show this menu' },
 };
 
@@ -80,11 +84,11 @@ Options:`);
   }
 };
 
-const main = async () => {
+const main = async (): Promise<void> => {
   try {
     const parsed = parseArgs({ options: configArgs, tokens: true });
     if (parsed.values.help) {
-      help(0);
+      return help(0);
     }
 
     if (parsed.values['stub-service']) {
@@ -95,6 +99,9 @@ const main = async () => {
     for (const key of Object.keys(parsed.values) as ConfigKeys[]) {
       configOverrides[camelCase(key) as keyof Config] = parsed.values[key] as never;
     }
+    if (parsed.values['max-line-length']) {
+      configOverrides.maxLineLength = +parsed.values['max-line-length'];
+    }
 
     const fullConfig = await getConfig(configOverrides);
     await generate(fullConfig);
@@ -104,7 +111,8 @@ const main = async () => {
 
     if (code === 'ERR_PARSE_ARGS_INVALID_OPTION_VALUE' || code === 'ERR_PARSE_ARGS_UNKNOWN_OPTION') {
       console.error(message);
-      help(1);
+
+      return help(1);
     }
 
     console.error(e);
