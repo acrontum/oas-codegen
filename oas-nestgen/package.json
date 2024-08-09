@@ -39,7 +39,7 @@
     "ts-morph": "^20.0.0"
   },
   "files": [
-    "dist/**/*.ts",
+    "dist/**/*.js",
     "dist/**/*.d.ts",
     "readme.md"
   ]
