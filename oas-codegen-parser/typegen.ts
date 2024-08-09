@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-
 import { createWriteStream } from 'fs';
+import { access } from 'node:fs/promises';
+import { join } from 'node:path';
 import { OpenAPIV3 } from 'openapi-types';
 import { DEBUG, TypeGenTypes, camelCase, methods, omitFromExtras, primitives, schemaTypeHints, upper, validators } from './lib';
 import {
@@ -39,6 +40,31 @@ export class TypeGen {
     this.refContentMap = {};
     this.schemaLocation = '';
     this.parsedSchemas = { referenceMap: this.refContentMap };
+  }
+
+  async loadParsed(typegen: typeof this.parsedSchemas, emit = true): Promise<void> {
+    this.parsedSchemas = typegen;
+
+    if (!emit) {
+      return;
+    }
+
+    const events = Object.keys(this.parsedSchemas).filter(
+      (key) => key !== 'referenceMap' && key !== 'schemaRefMap',
+    ) as TypeGenType[];
+
+    const emitters: Promise<unknown>[] = [];
+    for (const event of events) {
+      for (const model of this.parsedSchemas[event]) {
+        for (const callback of this.callbacks[event] || []) {
+          if (typeof callback === 'function') {
+            await callback(model);
+          }
+        }
+      }
+    }
+
+    await Promise.all(emitters);
   }
 
   on(event: TypeGenType, callback: (model: any) => any) {
@@ -150,15 +176,19 @@ export class TypeGen {
     const originalHashMethod = this.customHasher;
     this.customHasher = (_: null, parsed?: TypeGenRef | TypeGenModel, name?: string) => name || parsed?.name;
 
+    const assertions: [unknown, TypeGenRef | TypeGenModel, string][] = [];
     for (const [componentName, value] of Object.entries(this.schema.components) as [string, SchemaComponent][]) {
       for (const [name, schema] of Object.entries(value)) {
         let typeHint = schemaTypeHints[componentName] || componentName.toUpperCase();
 
         this.schemaLocation = `components.${componentName}`;
         const model = this.schemaToType(schema, typeHint, { name });
-        this.assertRef(schema, model, `#/components/${componentName}/${name}`);
-        this.assertRef(schema, model, JSON.stringify(schema));
+        assertions.push([schema, model, `#/components/${componentName}/${name}`], [schema, model, JSON.stringify(schema)]);
       }
+    }
+
+    for (const [schema, model, name] of assertions) {
+      this.assertRef(schema, model, name);
     }
 
     this.schemaLocation = '';
@@ -358,36 +388,6 @@ export class TypeGen {
     return parsed;
   }
 
-  private parseCombinators(
-    schema: OpenAPIV3.NonArraySchemaObject,
-    parsed: TypeGenModel<SchemaComponent>,
-    required: Record<string, boolean>,
-  ): void {
-    const mapSubschema = (
-      name: string,
-      subSchema: OpenAPIV3.SchemaObject | OpenAPIV3.ReferenceObject,
-    ): TypeGenRef | TypeGenModel => {
-      const model = this.schemaToType(subSchema, null, { name, deps: parsed.dependencies });
-      // this.assertRef(schema, model);
-      if ('dependencies' in model) {
-        model.dependencies = [];
-      }
-
-      return model;
-    };
-
-    if ('allOf' in schema) {
-      parsed.allOf = schema.allOf.map((s, i) => mapSubschema(`${parsed.name}AllOf${i}`, s));
-    }
-    if ('anyOf' in schema) {
-      parsed.anyOf = schema.anyOf.map((s, i) => mapSubschema(`${parsed.name}AnyOf${i}`, s));
-    }
-    if ('oneOf' in schema) {
-      parsed.oneOf = schema.oneOf.map((s, i) => mapSubschema(`${parsed.name}OneOf${i}`, s));
-      // discrinator
-    }
-  }
-
   private parseSchemaProps(schema: OpenAPIV3.NonArraySchemaObject, parsed: TypeGenModel, required: Record<string, boolean>) {
     for (const [name, prop] of Object.entries(schema.properties || {})) {
       const field: TypeGenTypeField = {
@@ -457,6 +457,36 @@ export class TypeGen {
       }
 
       parsed.fields.push(field);
+    }
+  }
+
+  private parseCombinators(
+    schema: OpenAPIV3.NonArraySchemaObject,
+    parsed: TypeGenModel<SchemaComponent>,
+    required: Record<string, boolean>,
+  ): void {
+    const mapSubschema = (
+      name: string,
+      subSchema: OpenAPIV3.SchemaObject | OpenAPIV3.ReferenceObject,
+    ): TypeGenRef | TypeGenModel => {
+      const model = this.schemaToType(subSchema, null, { name, deps: parsed.dependencies });
+      // this.assertRef(schema, model);
+      if ('dependencies' in model) {
+        model.dependencies = [];
+      }
+
+      return model;
+    };
+
+    if ('allOf' in schema) {
+      parsed.allOf = schema.allOf.map((s, i) => mapSubschema(`${parsed.name}AllOf${i}`, s));
+    }
+    if ('anyOf' in schema) {
+      parsed.anyOf = schema.anyOf.map((s, i) => mapSubschema(`${parsed.name}AnyOf${i}`, s));
+    }
+    if ('oneOf' in schema) {
+      parsed.oneOf = schema.oneOf.map((s, i) => mapSubschema(`${parsed.name}OneOf${i}`, s));
+      // discrinator
     }
   }
 
@@ -581,10 +611,8 @@ export class TypeGen {
           throw 'is array type without items?';
         }
 
-
         const itemType = this.schemaToType(payload.schema.items, null, { name });
         const payloadSchema = this.assertRef(payload.schema.items, itemType, itemType.name || name).ref;
-
 
         const response: TypeGenResponse = {
           name: itemType.name || name,
@@ -690,7 +718,7 @@ export class TypeGen {
 
   private parseMethodObject(method: Method, schema: OpenAPIV3.OperationObject, parsedPath: TypeGenPathItem): TypeGenMethod {
     const opItem: TypeGenMethod = {
-      name: this.getResponseName({ path: parsedPath, tags: schema.tags }, null, { contentType: method, status: null }),
+      name: camelCase(schema.operationId, true),
       method,
       tType: TypeGenTypes.method,
       schema,
@@ -760,9 +788,10 @@ export class TypeGen {
         name: model.schema.name,
         type: model.type,
         validations: model.validations,
-        subtype: (model.schema.schema as OpenAPIV3.SchemaObject)?.format ||
-        ((model.schema.schema as OpenAPIV3.ArraySchemaObject)?.items as OpenAPIV3.SchemaObject)?.format,
-        enum: model.enum || (model.schema.schema as any)?.enum
+        subtype:
+          (model.schema.schema as OpenAPIV3.SchemaObject)?.format ||
+          ((model.schema.schema as OpenAPIV3.ArraySchemaObject)?.items as OpenAPIV3.SchemaObject)?.format,
+        enum: model.enum || (model.schema.schema as any)?.enum,
       };
 
       if (model.dependencies) {
@@ -784,27 +813,63 @@ export class TypeGen {
   }
 }
 
-if (require.main === module) {
+const usage = `usage: typegen <input_api_json | parsed_typegen> [output_path | --from-typegen-json]
+
+When --from-typegen-json is provided, the already parsed is loaded from file, and will emit model events and no output is written.
+
+eg:
+  typegen api.json
+  typegen api.json typegen.json
+  typegen typegen.json --from-typegen-json
+`;
+
+const main = async () => {
   if (process.argv.length < 3) {
-    console.error('requires a file as argument');
-    console.error('usage: typegen <input_api_json> [output_path]');
+    console.error(`requires a file as argument\n${usage}`);
     process.exit(1);
   }
 
-  const file = require('path').join(process.cwd(), process.argv[2]);
-  if (!require('fs').existsSync(file)) {
-    console.error(`File not found: ${process.argv[2]}`);
+  const positional: string[] = [];
+  let inputFileType: 'openapi' | 'typegen' = 'openapi';
+
+  for (const arg of process.argv.slice(2)) {
+    if (arg === '--from-typegen-json') {
+      inputFileType = 'typegen';
+    } else {
+      positional.push(arg);
+    }
+  }
+
+  if (positional.length > 2) {
+    console.error(`too many arguments arguments\n${usage}`);
+    process.exit(1);
+  }
+
+  const file = join(process.cwd(), positional[0]);
+  if (
+    !(await access(file)
+      .then(() => true)
+      .catch(() => false))
+  ) {
+    console.error(`File not found: ${positional[0]}`);
     process.exit(1);
   }
 
   const input = require(file);
-  const output = process.argv[3] ? createWriteStream(process.argv[3]) : process.stdout;
+  const output = positional[1] ? createWriteStream(positional[1]) : process.stdout;
 
   const tg = new TypeGen();
 
-  tg.parseSchema(input, file)
-    .then(() => output.write(JSON.stringify(tg.parsedSchemas)))
-    .catch(console.error);
+  if (inputFileType === 'typegen') {
+    await tg.loadParsed(input);
+  } else {
+    await tg.parseSchema(input, file);
+    output.write(JSON.stringify(tg.parsedSchemas));
+  }
+};
+
+if (require.main === module) {
+  main().catch(console.error);
 } else {
   global.TypeGen = TypeGen;
 }
