@@ -55,7 +55,7 @@ const findModelFields = (model: TypeGenModel<any>, search: string) => {
   }
 
   return found;
-}
+};
 
 const schemaGen = (model: TypeGenModel<any>, genModel: ModelGen): { content: string; imports: Imports } => {
   const schema = [];
@@ -76,7 +76,7 @@ const schemaGen = (model: TypeGenModel<any>, genModel: ModelGen): { content: str
     if (dep.tType === TypeGenTypes.schema) {
       const depModel = genModel(dep, imports);
       if (depModel === 'json') {
-        findModelFields(model, dep.name)?.forEach(field => field.subtype = 'json');
+        findModelFields(model, dep.name)?.forEach((field) => (field.subtype = 'json'));
       } else if (depModel) {
         schema.push(depModel);
       }
@@ -411,7 +411,7 @@ const augmentMethodParam = (model: TypeGenModel<OpenAPIV3.ParameterObject>): Typ
   await mkdir(outDir, { recursive: true }).catch(() => null);
   await mkdir(dirname(indexFilePath), { recursive: true }).catch(() => null);
 
-  await typegen.parseSchema(schema);
+  await typegen.loadParsed(schema);
 
   const indexExportKeys = [...indexExports.keys()].sort();
 
