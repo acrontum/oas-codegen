@@ -45,6 +45,7 @@ export type Method = {
   controllerName: string;
   url: string;
   opid: string;
+  typegenMethod: TypeGenMethod;
   imports?: Import[];
 };
 
@@ -105,6 +106,13 @@ export const nameHeadersParams = (typegenMethod: TypeGenMethod) =>
   typegenMethod.headerParams?.length ? `${typegenMethod.name}Headers` : null;
 
 export const isDefaultProduces = (contentType: string) => true;
+
+export const getDefaultServiceContent = (method: Method): { statements: string[]; imports: [string, string][] } => {
+  return {
+    statements: ['throw new NotImplementedException();'],
+    imports: [['@nestjs/common', 'NotImplementedException']],
+  };
+};
 
 const basicTypes = {
   string: true,
@@ -216,6 +224,7 @@ export const methodFromTypegen = (config: Config, typegenMethod: TypeGenMethod):
     controllerName,
     opid,
     url,
+    typegenMethod,
   };
   const extraMethodDecorators = config.extraDecorators(typegenMethod, parsedMethod);
   parsedMethod.decorators.push(...extraMethodDecorators?.decorators);
