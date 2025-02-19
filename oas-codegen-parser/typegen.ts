@@ -95,7 +95,7 @@ export class TypeGen {
 
     this.collectDefinitions();
 
-    for (const [pathName, pathDefiniton] of Object.entries(this.schema.paths)) {
+    for (const [pathName, pathDefiniton] of Object.entries(this.schema.paths || {})) {
       this.schemaLocation = `paths.${pathName}`;
       const parsedPath = this.parsePathObject(pathName, pathDefiniton);
 
@@ -177,7 +177,7 @@ export class TypeGen {
     this.customHasher = (_: null, parsed?: TypeGenRef | TypeGenModel, name?: string) => name || parsed?.name;
 
     const assertions: [unknown, TypeGenRef | TypeGenModel, string][] = [];
-    for (const [componentName, value] of Object.entries(this.schema.components) as [string, SchemaComponent][]) {
+    for (const [componentName, value] of Object.entries(this.schema.components || {}) as [string, SchemaComponent][]) {
       for (const [name, schema] of Object.entries(value)) {
         let typeHint = schemaTypeHints[componentName] || componentName.toUpperCase();
 
