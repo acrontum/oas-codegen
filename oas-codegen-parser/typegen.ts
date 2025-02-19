@@ -718,7 +718,9 @@ export class TypeGen {
 
   private parseMethodObject(method: Method, schema: OpenAPIV3.OperationObject, parsedPath: TypeGenPathItem): TypeGenMethod {
     const opItem: TypeGenMethod = {
-      name: camelCase(schema.operationId, true),
+      name: schema.operationId
+        ? camelCase(schema.operationId, true)
+        : this.getResponseName({ path: parsedPath, tags: schema.tags }, null, { contentType: method, status: null }),
       method,
       tType: TypeGenTypes.method,
       schema,
