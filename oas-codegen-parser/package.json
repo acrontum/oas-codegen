@@ -1,6 +1,6 @@
 {
   "name": "@acrontum/oas-codegen-parser",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "description": "OpenAPI schema parser / mapper for codegen tools",
   "repository": {
     "type": "git",
