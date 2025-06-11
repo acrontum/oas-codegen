@@ -112,7 +112,7 @@ export const omitFromExtras = {
   items: true,
   $ref: true,
   properties: true,
-  default: true,
+  // default: true,
   // required: true,
   enum: true,
   description: true,
