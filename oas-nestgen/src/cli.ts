@@ -2,7 +2,6 @@
 
 import { parseArgs, ParseArgsConfig } from 'node:util';
 import { config, Config, getConfig } from './config';
-import './console-patch';
 import { generate } from './oas-nestgen';
 import { camelCase } from './string-utils';
 

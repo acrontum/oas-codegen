@@ -12,6 +12,7 @@
     "oas-nestgen": "dist/cli.js"
   },
   "scripts": {
+    "prepublishOnly": "npm run build",
     "prebuild": "rm -rf dist",
     "build": "tsc",
     "lint": "prettier --write 'src/*'",

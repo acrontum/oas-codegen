@@ -83,15 +83,32 @@ export const config: Config = {
 
 export const getConfig = async (overrides: Partial<Config> = {}) => {
   config.configFile = overrides.configFile || config.configFile;
-  const supportedExtensions = ['', '.js', '.json'];
 
-  for (const ext of supportedExtensions) {
+  if (overrides.configFile) {
+    try {
+      if (await exists(join(process.cwd(), overrides.configFile))) {
+        Object.assign(config, require(join(process.cwd(), overrides.configFile)));
+
+        return Object.assign(config, overrides);
+      }
+    } catch (e) {
+      throw new Error(`Failed to load config ${overrides.configFile}: ${(e as Error).message}`);
+    }
+  }
+
+  const defaultExtensions = ['', '.js', '.json'];
+
+  for (const ext of defaultExtensions) {
     const configFile = `${config.configFile}${ext}`;
 
     if (await exists(join(process.cwd(), configFile))) {
-      Object.assign(config, require(join(process.cwd(), configFile)));
+      try {
+        Object.assign(config, require(join(process.cwd(), configFile)));
 
-      return Object.assign(config, overrides);
+        return Object.assign(config, overrides);
+      } catch (e) {
+        throw new Error(`Failed to load config ${overrides.configFile}: ${(e as Error).message}`);
+      }
     }
   }
 
