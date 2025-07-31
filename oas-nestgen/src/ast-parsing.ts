@@ -428,14 +428,22 @@ export const modifyController = async (
   }
 
   if (serviceMethods?.length) {
-    const ctor = ctrl.getConstructors()[0] || ctrl.insertConstructor(0, {});
+    const serviceCtor = ctrl.getConstructors()[0] || ctrl.insertConstructor(0, {});
     const serviceType = `${typegenModule.service.name}Service`;
 
     if (!serviceParam) {
-      ctor.addParameter({ name: serviceName, type: camelCase(serviceName, true), scope: Scope.Private });
+      serviceCtor.addParameter({ name: serviceName, type: camelCase(serviceName, true), scope: Scope.Private });
       addImport(imports, `./${typegenModule.service.fileName.replace('.ts', '')}`, serviceType);
       changed = true;
     }
+
+    if (!serviceCtor.getParameters().length) {
+      serviceCtor.remove();
+    }
+  }
+
+  if (!ctor.getParameters().length) {
+    ctor.remove();
   }
 
   if (changed) {
