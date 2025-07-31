@@ -10,7 +10,6 @@ import {
   modifyService,
 } from './ast-parsing';
 import { Config } from './config';
-import './console-patch';
 import { assertFileFromTemplate, exists } from './file-utils';
 import { getTypesToGen, Method, Module } from './parse-typegen';
 import { getController, getModule, getOpIdDecorator, getService } from './templates';
@@ -193,3 +192,11 @@ export const generate = async (config: Config) => {
     console.log('- no files were harmed in the running of this command (dry-run) -');
   }
 };
+
+export * from './ast-parsing';
+export * from './cli';
+export * from './config';
+export * from './file-utils';
+export * from './parse-typegen';
+export * from './string-utils';
+export * from './templates';
