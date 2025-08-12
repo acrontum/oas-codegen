@@ -87,7 +87,8 @@ export const getConfig = async (overrides: Partial<Config> = {}) => {
   if (overrides.configFile) {
     try {
       if (await exists(join(process.cwd(), overrides.configFile))) {
-        Object.assign(config, require(join(process.cwd(), overrides.configFile)));
+        const customConfig = require(join(process.cwd(), overrides.configFile));
+        Object.assign(config, customConfig.default, customConfig);
 
         return Object.assign(config, overrides);
       }
@@ -104,7 +105,6 @@ export const getConfig = async (overrides: Partial<Config> = {}) => {
     if (await exists(join(process.cwd(), configFile))) {
       try {
         const customConfig = require(join(process.cwd(), configFile));
-
         Object.assign(config, customConfig.default, customConfig);
 
         return Object.assign(config, overrides);
