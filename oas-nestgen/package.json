@@ -13,8 +13,7 @@
   },
   "scripts": {
     "prepublishOnly": "npm run build",
-    "prebuild": "rm -rf dist",
-    "build": "tsc",
+    "build": "rm -rf dist && tsc",
     "lint": "prettier --write 'src/*'",
     "test": "node -r source-map-support/register dist/cli.js -c oasn.js",
     "version": "npm verison --no-commit-hooks --no-git-tag-version",

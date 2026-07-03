@@ -13,8 +13,8 @@
     "ocp": "dist/typegen.js"
   },
   "scripts": {
-    "prebuild": "rm -rf dist",
-    "build": "tsc",
+    "prepublishOnly": "npm run build",
+    "build": "rm -rf dist && tsc",
     "format": "npx prettier --print-width 130 --write '**/*.ts'",
     "version": "npm verison --no-commit-hooks --no-git-tag-version",
     "setup": "git config core.hooksPath ./githooks",
