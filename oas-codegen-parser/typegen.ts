@@ -44,6 +44,7 @@ export class TypeGen {
 
   async loadParsed(typegen: typeof this.parsedSchemas, emit = true): Promise<void> {
     this.parsedSchemas = typegen;
+    this.refContentMap = this.parsedSchemas.referenceMap;
 
     if (!emit) {
       return;
