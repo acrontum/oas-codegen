@@ -59,8 +59,8 @@ export const config: Config = {
   modulesPath: './src/modules/',
   opIdDecoratorPath: './src/common/decorators/op-id.decorator.ts',
 
-  opIdDecoratorImport: 'src/common/decorators/op-id.decorator',
-  typesImport: 'src/types',
+  opIdDecoratorImport: '../../common/decorators/op-id.decorator',
+  typesImport: '../../types',
 
   ignoredOpIds: null,
 
