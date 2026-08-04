@@ -5,8 +5,13 @@ import { capitalize, dashCase, pascalCase } from './string-utils';
 
 export type Decorator = { name: string; importFrom: string; content?: string[] | null };
 export type Import = { name: string; importFrom: string };
-export type ReturnType = { name: string; array?: boolean; importFrom?: string } | null;
-export type MethodReturnValue = { response: ReturnType; produces: string | null } | null;
+export type ReturnType = {
+  name: string;
+  status: number | null;
+  produces: string | null;
+  array?: boolean;
+  importFrom?: string;
+} | null;
 export type BodyParamsValue = { body: string; consumes: string | null } | null;
 
 export type Parameter = {
@@ -39,6 +44,7 @@ export type Service = {
 
 export type Method = {
   name: string;
+  method: TypeGenMethod['method'] | null;
   decorators: Decorator[];
   methodParams: Parameter[];
   returnType: ReturnType;
@@ -66,23 +72,23 @@ export const getMethodName = (method: TypeGenMethod, basename: string): string =
   return name === verb ? verb + basename : name;
 };
 
-export const getReturnValue = (typegenMethod: TypeGenMethod, config: Config): MethodReturnValue => {
+export const getReturnValue = (typegenMethod: TypeGenMethod, config: Config): ReturnType => {
   const potentialResponses = new Set<TypeGenMethod['responses'][number]>();
 
   for (const response of typegenMethod.responses) {
-    if (response.status >= 200 && response.status <= 299 && response.status !== 204) {
+    if (response.status >= 200 && response.status <= 299) {
       potentialResponses.add(response);
     }
   }
 
   const responses = [...potentialResponses.values()];
   if (responses?.length === 1) {
-    const response: ReturnType =
-      responses[0]?.payload?.tType === 'REF'
-        ? { name: responses[0].type, importFrom: config?.typesImport, array: responses[0].array }
-        : { name: responses[0].type || 'void', array: responses[0].array };
+    const status = responses[0].status;
+    const produces = status !== 204 ? responses[0].contentType || null : null;
 
-    return { response, produces: responses[0].contentType || null };
+    return responses[0]?.payload?.tType === 'REF'
+      ? { name: responses[0].type, importFrom: config?.typesImport, array: responses[0].array, status, produces }
+      : { name: responses[0].type || 'void', array: responses[0].array, status, produces };
   }
 
   return null;
@@ -105,9 +111,9 @@ export const nameQueryParams = (typegenMethod: TypeGenMethod) =>
 export const nameHeadersParams = (typegenMethod: TypeGenMethod) =>
   typegenMethod.headerParams?.length ? `${typegenMethod.name}Headers` : null;
 
-export const isDefaultProduces = (contentType: string) => true;
+export const isDefaultProduces = (_contentType: string) => true;
 
-export const getDefaultServiceContent = (method: Method): { statements: string[]; imports: [string, string][] } => {
+export const getDefaultServiceContent = (_method: Method): { statements: string[]; imports: [string, string][] } => {
   return {
     statements: ['throw new NotImplementedException();'],
     imports: [['@nestjs/common', 'NotImplementedException']],
@@ -125,7 +131,7 @@ const basicTypes = {
 } as const;
 
 export const extraDecorators = (
-  typegenMethod: TypeGenMethod,
+  _typegenMethod: TypeGenMethod,
   parsed: Method,
 ): { decorators: Decorator[]; imports?: { name: string; importFrom: string }[] } => {
   if (!parsed.returnType || parsed.returnType.name in basicTypes) {
@@ -144,7 +150,7 @@ export const getMethodControllerName = (typegenMethod: TypeGenMethod): string =>
   return pascalCase(typegenMethod.tags?.[0] || typegenMethod.path.name.split('/').find((p) => !!p) || '');
 };
 
-export const getSubPath = (typegenMethod: TypeGenMethod, url: string, root: string): string => {
+export const getSubPath = (_typegenMethod: TypeGenMethod, url: string, root: string): string => {
   return !root ? url : url.replace(new RegExp(`^\/?${dashCase(root)}\/?`), '');
 };
 
@@ -204,21 +210,12 @@ export const methodFromTypegen = (config: Config, typegenMethod: TypeGenMethod):
     });
   }
 
-  let returnType: { name: string; importFrom?: string } | null = null;
-  const returnValue = config.getReturnValue(typegenMethod, config);
-  if (returnValue) {
-    returnType = returnValue.response;
-
-    if (returnValue.produces && !config.isDefaultProduces(returnValue.produces)) {
-      decorators.push({ name: 'Header', content: [`'Content-Type'`, `'${returnValue.produces}'`], importFrom: '@nestjs/common' });
-    }
-  } else {
-    returnType = { name: 'void' };
-  }
+  const returnType = config.getReturnValue(typegenMethod, config) || { name: 'void', status: null, produces: null };
 
   const parsedMethod: Method = {
     decorators,
     name,
+    method: typegenMethod.method,
     methodParams,
     returnType,
     controllerName,
