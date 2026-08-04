@@ -3,13 +3,11 @@ import {
   ClassDeclaration,
   DecoratableNode,
   Decorator,
-  DecoratorStructure,
   ImportDeclaration,
   IndentationText,
   MethodDeclaration,
   ModuledNode,
   ObjectLiteralExpression,
-  OptionalKind,
   ParameterDeclaration,
   Project,
   PropertyAssignmentStructure,
@@ -51,16 +49,18 @@ const addImports = (imports: ImportMap, sets: [string, string][]) => {
 };
 
 const addImport = (imports: ImportMap, from: string, what: string) => {
-  imports.list[from] ||= new Set<string>();
-  imports.list[from].add(what);
+  (imports.list[from] ||= new Set<string>()).add(what);
 };
 
-const dotLastAlphaSorting = (a: string, b: string) => {
-  if (a[0] == '.' && b[0] !== '.') {
+const dotLastAlphaSorting = (oa: string, ob: string) => {
+  const a = oa.replace('type ', '');
+  const b = ob.replace('type ', '');
+
+  if (a[0] === '.' && b[0] !== '.') {
     return 1;
   }
 
-  if (b[0] == '.' && a[0] !== '.') {
+  if (b[0] === '.' && a[0] !== '.') {
     return -1;
   }
 
@@ -88,7 +88,11 @@ const getImportMap = (imports: ImportDeclaration[]): ImportMap => {
       const moduleSpecifiers = Object.keys(mapped.list).sort(dotLastAlphaSorting);
 
       for (const moduleSpecifier of moduleSpecifiers) {
-        const preview = `import { ${[...mapped.list[moduleSpecifier].values()].sort().join(', ')} } from '${moduleSpecifier}';`;
+        let type: ' type' | '' = '';
+        if (moduleSpecifier.indexOf('type ') === 0) {
+          type = ' type';
+        }
+        const preview = `import${type}{ ${[...mapped.list[moduleSpecifier].values()].sort().join(', ')} } from '${moduleSpecifier.replace('type ', '')}';`;
         let prepend = '';
         if (preview.length >= config.maxLineLength) {
           prepend = '\n';
@@ -100,15 +104,15 @@ const getImportMap = (imports: ImportDeclaration[]): ImportMap => {
 
         if (mapped.list[moduleSpecifier]?._namespace) {
           formatted.push({
-            moduleSpecifier,
-            isTypeOnly: false,
+            moduleSpecifier: moduleSpecifier.replace('type ', ''),
+            isTypeOnly: type !== '',
             namespaceImport: mapped.list[moduleSpecifier]._namespace,
           });
         }
 
         formatted.push({
-          moduleSpecifier,
-          isTypeOnly: false,
+          moduleSpecifier: moduleSpecifier.replace('type ', ''),
+          isTypeOnly: type !== '',
           namedImports,
         });
       }
@@ -118,7 +122,7 @@ const getImportMap = (imports: ImportDeclaration[]): ImportMap => {
   };
 
   for (const imp of imports) {
-    const from = imp.getModuleSpecifierValue();
+    const from = (imp.isTypeOnly() ? 'type ' : '') + imp.getModuleSpecifierValue();
     mapped.list[from] ||= new Set<string>();
 
     const namespace = imp.getNamespaceImport()?.getText();
@@ -138,10 +142,6 @@ const getImportMap = (imports: ImportDeclaration[]): ImportMap => {
   }
 
   return mapped;
-};
-
-const convertDecorators = (from: TypegenDecorator[]): OptionalKind<DecoratorStructure>[] => {
-  return from.map((deco) => ({ name: deco.name, arguments: deco.content as any }));
 };
 
 // lazy
@@ -296,6 +296,19 @@ const assertMethod = (
       );
     }
   }
+  const responseHandledManually = ('Res' in mappedParamDecos || 'Response' in mappedParamDecos) && !hasPassthrough;
+
+  if (method.returnType && !responseHandledManually) {
+    const { status, produces } = method.returnType;
+    if (produces && !config.isDefaultProduces(produces)) {
+      method.decorators.push({ name: 'Header', content: [`'Content-Type'`, `'${produces}'`], importFrom: '@nestjs/common' });
+    }
+
+    // default is 200, unless POST -> 201
+    if (typeof status === 'number' && !(status === 200 || (method.method === 'post' && status === 201))) {
+      method.decorators.push({ name: 'HttpCode', content: [`${status}`], importFrom: '@nestjs/common' });
+    }
+  }
 
   // TODO: map to { [parmaname]: { [decoratorname]: decorator } }
   if (applyDecoratorChanges(existing.getDecorators() || [], method.decorators, existing, imports)) {
@@ -318,8 +331,8 @@ const assertMethod = (
       }
     : { [`${method.returnType?.name}`]: true };
 
-  // if @Res / @Response decorator present, this can be ignored.
-  if (!(('Res' in mappedParamDecos || 'Response' in mappedParamDecos) && !hasPassthrough) && !((retType || '') in allowedTypes)) {
+  // if @Res / @Response decorator present (without { passthrough: true }), we skip this type enforcement
+  if (!responseHandledManually && !((retType || '') in allowedTypes)) {
     existing.setReturnType(`Promise<${method.returnType?.name}${returnArray ? '[]' : ''}>`);
 
     if (!config.stubService) {
@@ -510,6 +523,7 @@ export const modifyService = async (
   for (const method of methods) {
     const serviceMethod: Method = {
       name: method.name,
+      method: method.method,
       returnType: method.returnType,
       imports: method.imports,
       decorators: [],

@@ -95,7 +95,7 @@ const assertController = async (controllerPath: string, details: Details): Promi
 };
 
 const assertService = async (servicePath: string, details: Details, serviceMethods: Method[]): Promise<Change> => {
-  const { module: mod, config, project } = details;
+  const { module: mod, project } = details;
   const content = getService(mod.service.name);
 
   const { change } = await assertProjectFile(details, content, servicePath, () =>
