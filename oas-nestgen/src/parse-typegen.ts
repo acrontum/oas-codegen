@@ -72,6 +72,14 @@ export const getMethodName = (method: TypeGenMethod, basename: string): string =
   return name === verb ? verb + basename : name;
 };
 
+const convertKnownTypes = (type?: string | null): string => {
+  if (type === 'integer') {
+    return 'number';
+  }
+
+  return type || 'void';
+};
+
 export const getReturnValue = (typegenMethod: TypeGenMethod, config: Config): ReturnType => {
   const potentialResponses = new Set<TypeGenMethod['responses'][number]>();
 
@@ -88,7 +96,7 @@ export const getReturnValue = (typegenMethod: TypeGenMethod, config: Config): Re
 
     return responses[0]?.payload?.tType === 'REF'
       ? { name: responses[0].type, importFrom: config?.typesImport, array: responses[0].array, status, produces }
-      : { name: responses[0].type || 'void', array: responses[0].array, status, produces };
+      : { name: convertKnownTypes(responses[0].type), array: responses[0].array, status, produces };
   }
 
   return null;
