@@ -132,6 +132,7 @@ const basicTypes = {
   string: true,
   boolean: true,
   number: true,
+  integer: true,
   void: true,
   null: true,
   undefined: true,
