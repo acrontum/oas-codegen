@@ -77,11 +77,13 @@ export const config: Config = {
   modulesPath: './src/modules/',
   // -o, --op-id-decorator-path PATH    OpId decorator file path (default ./src/common/decorators/op-id.decorator.ts)
   opIdDecoratorPath: './src/common/decorators/op-id.decorator.ts',
+  // -t, --types-path PATH              Path to typings file or folder (default ./src/types)
+  typesPath: './src/types',
 
-  // -O, --op-id-decorator-import NAME  OpId decorator import name (default src/common/decorators/op-id.decorator)
-  opIdDecoratorImport: 'src/common/decorators/op-id.decorator',
-  // -T, --types-import NAME            Typings import name (default src/types)
-  typesImport: 'src/types',
+  // -O, --op-id-decorator-import NAME  OpId decorator import name (defaults to the relative path from the generated file to op-id-decorator-path)
+  opIdDecoratorImport: null,
+  // -T, --types-import NAME            Typings import name (defaults to the relative path from the generated file to types-path)
+  typesImport: null,
 
   // -I, --ignored-op-ids NAME          Ignore changes for opId (can be invoked multiple times)
   ignoredOpIds: null,

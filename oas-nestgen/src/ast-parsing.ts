@@ -279,6 +279,7 @@ const assertMethod = (
   findExisting: () => MethodNode | undefined,
   imports: ImportMap,
   serviceName: string | null,
+  isService = false,
 ): 'created' | 'changed' | null => {
   let changed: 'created' | 'changed' | null = null;
 
@@ -311,7 +312,7 @@ const assertMethod = (
   }
   const responseHandledManually = ('Res' in mappedParamDecos || 'Response' in mappedParamDecos) && !hasPassthrough;
 
-  if (method.returnType && !responseHandledManually) {
+  if (method.returnType && !responseHandledManually && !isService) {
     const { status, produces } = method.returnType;
     if (produces && !config.isDefaultProduces(produces)) {
       method.decorators.push({ name: 'Header', content: [`'Content-Type'`, `'${produces}'`], importFrom: '@nestjs/common' });
@@ -528,7 +529,7 @@ export const modifyService = async (
       typegenMethod: method.typegenMethod,
     };
     const findExisting = () => getMethods(getCtrl()).find((m) => getMemberName(m) === serviceMethod.name);
-    const methodAdded = assertMethod(serviceSource, getCtrl, serviceMethod, findExisting, imports, null);
+    const methodAdded = assertMethod(serviceSource, getCtrl, serviceMethod, findExisting, imports, null, true);
     if (methodAdded !== null) {
       changed = true;
     }

@@ -1,7 +1,7 @@
 import { TypeGenMethod, camelCase } from '@acrontum/oas-codegen-parser';
 import { join } from 'path';
 import { Config } from './config';
-import { capitalize, dashCase, pascalCase } from './string-utils';
+import { capitalize, dashCase, pascalCase, relativeImportPath } from './string-utils';
 
 export type Decorator = { name: string; importFrom: string; content?: string[] | null };
 export type Import = { name: string; importFrom: string };
@@ -95,7 +95,7 @@ export const getReturnValue = (typegenMethod: TypeGenMethod, config: Config): Re
     const produces = status !== 204 ? responses[0].contentType || null : null;
 
     return responses[0]?.payload?.tType === 'REF'
-      ? { name: responses[0].type, importFrom: config?.typesImport, array: responses[0].array, status, produces }
+      ? { name: responses[0].type, importFrom: config?.typesImport || undefined, array: responses[0].array, status, produces }
       : { name: convertKnownTypes(responses[0].type), array: responses[0].array, status, produces };
   }
 
@@ -176,9 +176,14 @@ export const methodFromTypegen = (config: Config, typegenMethod: TypeGenMethod):
   const subroute = config.getSubPath(typegenMethod, url, controllerName);
   const name = config.getMethodName(typegenMethod, tag || '');
 
+  const moduleDir = join(config.modulesPath, dashCase(controllerName));
+  const typesImport = config.typesImport || relativeImportPath(moduleDir, config.typesPath);
+  const opIdDecoratorImport = config.opIdDecoratorImport || relativeImportPath(moduleDir, config.opIdDecoratorPath);
+  const resolvedConfig: Config = { ...config, typesImport, opIdDecoratorImport };
+
   const decorators: Decorator[] = [
     { name: capitalize(method), content: subroute ? [`'${subroute}'`] : [], importFrom: '@nestjs/common' },
-    { name: 'OpId', content: [`'${opid}'`], importFrom: config.opIdDecoratorImport },
+    { name: 'OpId', content: [`'${opid}'`], importFrom: opIdDecoratorImport },
   ];
   const methodParams: Parameter[] = [];
 
@@ -187,7 +192,7 @@ export const methodFromTypegen = (config: Config, typegenMethod: TypeGenMethod):
     methodParams.push({
       name: '_path',
       type: pathParams,
-      importFrom: config.typesImport,
+      importFrom: typesImport,
       decorators: [{ name: 'Param', content: [], importFrom: '@nestjs/common' }],
     });
   }
@@ -196,7 +201,7 @@ export const methodFromTypegen = (config: Config, typegenMethod: TypeGenMethod):
     methodParams.push({
       name: '_query',
       type: queryParams,
-      importFrom: config.typesImport,
+      importFrom: typesImport,
       decorators: [{ name: 'Query', content: [], importFrom: '@nestjs/common' }],
     });
   }
@@ -205,7 +210,7 @@ export const methodFromTypegen = (config: Config, typegenMethod: TypeGenMethod):
     methodParams.push({
       name: '_headers',
       type: headersParams,
-      importFrom: config.typesImport,
+      importFrom: typesImport,
       decorators: [{ name: 'Headers', content: [], importFrom: '@nestjs/common' }],
     });
   }
@@ -214,12 +219,12 @@ export const methodFromTypegen = (config: Config, typegenMethod: TypeGenMethod):
     methodParams.push({
       name: '_body',
       type: bodyParams.body,
-      importFrom: config.typesImport,
+      importFrom: typesImport,
       decorators: [{ name: 'Body', content: [], importFrom: '@nestjs/common' }],
     });
   }
 
-  const returnType = config.getReturnValue(typegenMethod, config) || { name: 'void', status: null, produces: null };
+  const returnType = config.getReturnValue(typegenMethod, resolvedConfig) || { name: 'void', status: null, produces: null };
 
   const parsedMethod: Method = {
     decorators,

@@ -25,9 +25,10 @@ export type Config = {
   appModulePath: string;
   modulesPath: string;
   opIdDecoratorPath: string;
+  typesPath: string;
 
-  opIdDecoratorImport: string;
-  typesImport: string;
+  opIdDecoratorImport: string | null;
+  typesImport: string | null;
 
   ignoredOpIds: string[] | null;
 
@@ -58,9 +59,10 @@ export const config: Config = {
   appModulePath: './src/app.module.ts',
   modulesPath: './src/modules/',
   opIdDecoratorPath: './src/common/decorators/op-id.decorator.ts',
+  typesPath: './src/types',
 
-  opIdDecoratorImport: '../../common/decorators/op-id.decorator',
-  typesImport: '../../types',
+  opIdDecoratorImport: null,
+  typesImport: null,
 
   ignoredOpIds: null,
 
