@@ -1,30 +1,61 @@
 import { camelCase } from '@acrontum/oas-codegen-parser';
-import {
-  ClassDeclaration,
-  DecoratableNode,
-  Decorator,
-  ImportDeclaration,
-  IndentationText,
-  MethodDeclaration,
-  ModuledNode,
-  ObjectLiteralExpression,
-  ParameterDeclaration,
-  Project,
-  PropertyAssignmentStructure,
-  QuoteKind,
-  Scope,
-  SourceFile,
-  SyntaxKind,
-} from 'ts-morph';
 import { config } from './config';
 import { Method, Module, Parameter, Decorator as TypegenDecorator } from './parse-typegen';
 import { dashCase } from './string-utils';
 import { formatOpidType } from './templates';
+import {
+  addArrayElements,
+  addClass,
+  addDecorator,
+  addMethod,
+  addObjectProperty,
+  addParameter,
+  addSourceFileAtPath,
+  addTypeAlias,
+  ClassNode,
+  CtorNode,
+  DecoratableNode,
+  DecoratorNode,
+  getArrayElements,
+  getClasses,
+  getConstructors,
+  getDecorator,
+  getDecoratorArguments,
+  getDecoratorName,
+  getDecorators,
+  getImportDeclarations,
+  getMemberName,
+  getMethods,
+  getObjectProperty,
+  getParameters,
+  getParameterTypeText,
+  getPropertyArray,
+  getPropertyInitializerText,
+  getReturnTypeText,
+  getTypeAlias,
+  getTypeAliasType,
+  ImportRecord,
+  insertConstructor,
+  isIdentifier,
+  isObjectLiteral,
+  MethodNode,
+  ObjectLiteralNode,
+  ParamNode,
+  removeDecorator,
+  removeMember,
+  setDecoratorArguments,
+  setImportDeclarations,
+  setIsAsync,
+  setParameterType,
+  setReturnType,
+  setTypeAliasType,
+  TsProject,
+  TsSourceFile,
+} from './ts-ast';
 
-type DecoratorWithTodo = TypegenDecorator & { task: 'create' | 'update'; decoratorNode?: Decorator };
-type ImportMapDeclaration = Parameters<ModuledNode['addImportDeclarations']>[0][number];
+type DecoratorWithTodo = TypegenDecorator & { task: 'create' | 'update' };
 interface ImportMap {
-  format: () => ImportMapDeclaration[];
+  format: () => ImportRecord[];
   list: Record<string, Set<string> & { _namespace?: string }>;
 }
 export type Modification = { changed: boolean };
@@ -67,52 +98,36 @@ const dotLastAlphaSorting = (oa: string, ob: string) => {
   return a.localeCompare(b);
 };
 
-const updateImports = (source: SourceFile | undefined, imports: ImportMap, remove = true) => {
-  if (!source) {
-    return;
-  }
-
-  if (remove) {
-    source.getImportDeclarations().forEach((node) => node.remove());
-  }
-
-  const toImport = imports.format();
-  source.addImportDeclarations(toImport);
+const updateImports = (source: TsSourceFile, imports: ImportMap) => {
+  setImportDeclarations(source, imports.format());
 };
 
-const getImportMap = (imports: ImportDeclaration[]): ImportMap => {
+const getImportMap = (imports: ImportRecord[]): ImportMap => {
   const mapped: ImportMap = {
     list: {},
     format: () => {
-      let formatted: ImportMapDeclaration[] = [];
+      const formatted: ImportRecord[] = [];
       const moduleSpecifiers = Object.keys(mapped.list).sort(dotLastAlphaSorting);
 
       for (const moduleSpecifier of moduleSpecifiers) {
-        let type: ' type' | '' = '';
-        if (moduleSpecifier.indexOf('type ') === 0) {
-          type = ' type';
-        }
-        const preview = `import${type}{ ${[...mapped.list[moduleSpecifier].values()].sort().join(', ')} } from '${moduleSpecifier.replace('type ', '')}';`;
-        let prepend = '';
-        if (preview.length >= config.maxLineLength) {
-          prepend = '\n';
-        }
-        const namedImports = [...mapped.list[moduleSpecifier].values()].sort().map((x) => `${prepend}${x}`);
-        if (prepend) {
-          namedImports.push('\n');
-        }
+        const isTypeOnly = moduleSpecifier.indexOf('type ') === 0;
+        const namedImports = [...mapped.list[moduleSpecifier].values()].sort();
 
         if (mapped.list[moduleSpecifier]?._namespace) {
           formatted.push({
             moduleSpecifier: moduleSpecifier.replace('type ', ''),
-            isTypeOnly: type !== '',
+            isTypeOnly,
             namespaceImport: mapped.list[moduleSpecifier]._namespace,
+            namedImports: [],
           });
+          if (!namedImports.length) {
+            continue;
+          }
         }
 
         formatted.push({
           moduleSpecifier: moduleSpecifier.replace('type ', ''),
-          isTypeOnly: type !== '',
+          isTypeOnly,
           namedImports,
         });
       }
@@ -122,21 +137,18 @@ const getImportMap = (imports: ImportDeclaration[]): ImportMap => {
   };
 
   for (const imp of imports) {
-    const from = (imp.isTypeOnly() ? 'type ' : '') + imp.getModuleSpecifierValue();
+    const from = (imp.isTypeOnly ? 'type ' : '') + imp.moduleSpecifier;
     mapped.list[from] ||= new Set<string>();
 
-    const namespace = imp.getNamespaceImport()?.getText();
-    if (namespace) {
-      mapped.list[from]._namespace = namespace;
+    if (imp.namespaceImport) {
+      mapped.list[from]._namespace = imp.namespaceImport;
     }
 
-    const defaultImport = imp.getDefaultImport()?.getText();
-    if (defaultImport) {
-      mapped.list[from].add(`default as ${defaultImport}`);
+    if (imp.defaultImport) {
+      mapped.list[from].add(`default as ${imp.defaultImport}`);
     }
 
-    const namedImports = imp.getNamedImports()?.map((n) => n.getText()) || [];
-    for (const named of namedImports) {
+    for (const named of imp.namedImports) {
       mapped.list[from].add(named);
     }
   }
@@ -149,10 +161,10 @@ const decoratorsEqual = (a: any, b: any) => {
   return JSON.stringify(a) === JSON.stringify(b);
 };
 
-const getDecoratorChanges = (existing: Decorator[], desired: TypegenDecorator[]): DecoratorWithTodo[] => {
-  const existingDecorators: Record<string, Decorator> = {};
+const getDecoratorChanges = (existing: readonly DecoratorNode[], desired: TypegenDecorator[]): DecoratorWithTodo[] => {
+  const existingDecorators: Record<string, string[]> = {};
   for (const deco of existing) {
-    existingDecorators[deco.getFullName()] = deco;
+    existingDecorators[getDecoratorName(deco)] = getDecoratorArguments(deco).map((a) => a.getText());
   }
 
   const mutations: DecoratorWithTodo[] = [];
@@ -160,16 +172,13 @@ const getDecoratorChanges = (existing: Decorator[], desired: TypegenDecorator[])
   for (const d of desired) {
     const name = d.name;
 
-    if (!existingDecorators[name]) {
+    if (!(name in existingDecorators)) {
       mutations.push({ ...d, task: 'create' });
       continue;
     }
 
-    const decoratorNode = existingDecorators[name];
-    const args = decoratorNode.getArguments()?.map((a) => a.getText());
-
-    if (!decoratorsEqual(args, d.content)) {
-      mutations.push({ ...d, task: 'update', decoratorNode: decoratorNode });
+    if (!decoratorsEqual(existingDecorators[name], d.content)) {
+      mutations.push({ ...d, task: 'update' });
     }
   }
 
@@ -177,13 +186,13 @@ const getDecoratorChanges = (existing: Decorator[], desired: TypegenDecorator[])
 };
 
 const applyDecoratorChanges = (
-  existing: Decorator[],
+  source: TsSourceFile,
+  getNode: () => DecoratableNode,
   desired: TypegenDecorator[],
-  node: DecoratableNode,
   imports: ImportMap,
 ): boolean => {
   let changed = false;
-  const todo = getDecoratorChanges(existing, desired);
+  const todo = getDecoratorChanges(getDecorators(getNode()), desired);
 
   for (const t of todo) {
     changed = true;
@@ -191,72 +200,71 @@ const applyDecoratorChanges = (
 
     if (t.task === 'create') {
       if (t.name in methodDecorators) {
-        existing.filter((e) => e.getFullName() in methodDecorators).forEach((d) => d.remove());
+        let methodDecorator: DecoratorNode | undefined;
+        while ((methodDecorator = getDecorators(getNode()).find((d) => getDecoratorName(d) in methodDecorators))) {
+          removeDecorator(source, methodDecorator);
+        }
       }
-      node.addDecorator({ name: t.name, arguments: t.content || [] });
+      addDecorator(source, getNode(), { name: t.name, arguments: t.content || [] });
     } else {
-      t.decoratorNode?.getArguments()?.forEach((node) => t.decoratorNode?.removeArgument(node));
-      t.decoratorNode?.addArguments(t.content || []);
+      const decoratorNode = getDecorator(getNode(), t.name);
+      if (decoratorNode) {
+        setDecoratorArguments(source, decoratorNode, t.content || []);
+      }
     }
   }
 
   return changed;
 };
 
-const assertClass = (source: SourceFile | undefined, name: string): ClassDeclaration => {
-  let ctrl = source?.getClasses()?.[0];
-  if (ctrl) {
-    return ctrl;
-  }
+const assertClass = (source: TsSourceFile, name: string): (() => ClassNode) => {
+  const getClass = () => getClasses(source)[0];
 
-  source?.addClass({ name, isExported: true });
-  ctrl = source?.getClasses()?.[0];
-  if (!ctrl) {
+  if (!getClass()) {
+    addClass(source, name);
+  }
+  if (!getClass()) {
     throw `${__filename} assertClass: Something went wrong`;
   }
 
-  return ctrl;
+  return getClass;
 };
 
 const applyParameterChanges = (
-  current: ParameterDeclaration[],
+  source: TsSourceFile,
+  getMethod: () => MethodNode,
   desired: Parameter[],
-  method: MethodDeclaration,
   imports: ImportMap,
 ): boolean => {
   let changed = false;
-  const toCheck: Record<string, ParameterDeclaration> = {};
-  for (const param of current) {
-    const paramDecorators = param.getDecorators();
-    const name = paramDecorators?.[paramDecorators?.length - 1]?.getName() || param.getName();
-    toCheck[name] = param;
-  }
+  const paramKey = (param: ParamNode) => {
+    const paramDecorators = getDecorators(param);
+    return paramDecorators.length ? getDecoratorName(paramDecorators[paramDecorators.length - 1]) : getMemberName(param);
+  };
 
   for (const param of desired) {
     const paramName = param.decorators?.[0]?.name || param.name;
-    let existing = toCheck[paramName];
+    const getParam = () =>
+      getParameters(getMethod()).find((p) => paramKey(p) === paramName || getMemberName(p) === param.name) as ParamNode;
 
-    if (!existing) {
-      existing = method.addParameter({ name: param.name, type: param.type });
+    if (!getParam()) {
+      addParameter(source, getMethod(), { name: param.name, type: param.type });
       addImport(imports, param.importFrom, param.type);
       changed = true;
     }
 
-    if (existing.getStructure().type !== param.type) {
-      existing.setType(param.type);
+    if (getParameterTypeText(getParam()) !== param.type) {
+      setParameterType(source, getParam(), param.type);
       addImport(imports, param.importFrom, param.type);
       changed = true;
     }
 
-    changed = applyDecoratorChanges(existing.getDecorators(), param.decorators || [], existing, imports) || changed;
+    changed = applyDecoratorChanges(source, getParam, param.decorators || [], imports) || changed;
 
-    const returnType = existing
-      .getTypeNode()
-      ?.getText()
-      ?.replace(/^Promise<(.*)>$/, (_, x) => x);
+    const returnType = getParameterTypeText(getParam())?.replace(/^Promise<(.*)>$/, (_, x) => x);
 
     if (returnType?.trim() !== param.type) {
-      existing.setType(param.type);
+      setParameterType(source, getParam(), param.type);
       changed = true;
     }
   }
@@ -265,34 +273,39 @@ const applyParameterChanges = (
 };
 
 const assertMethod = (
-  klass: ClassDeclaration,
+  source: TsSourceFile,
+  getClass: () => ClassNode,
   method: Method,
-  existing: MethodDeclaration,
+  findExisting: () => MethodNode | undefined,
   imports: ImportMap,
   serviceName: string | null,
-): { changed: 'created' | 'changed' | null; method: MethodDeclaration } => {
+): 'created' | 'changed' | null => {
   let changed: 'created' | 'changed' | null = null;
 
-  if (!existing) {
+  if (!findExisting()) {
     if (config.stubService && serviceName) {
-      existing = klass.addMethod({ name: method.name, statements: [`return this.${serviceName}.${method.name}();`] });
+      addMethod(source, getClass(), { name: method.name, statements: [`return this.${serviceName}.${method.name}();`] });
     } else {
       const { statements, imports: importList } = config.getDefaultServiceContent(method);
-      existing = klass.addMethod({ name: method.name, statements });
+      addMethod(source, getClass(), { name: method.name, statements });
       addImports(imports, importList);
     }
     changed = 'created';
   }
 
-  const mappedParamDecos: Record<string, Decorator> = {};
-  const params = existing.getParameters();
+  const lastByName = () => {
+    const named = getMethods(getClass()).filter((m) => getMemberName(m) === method.name);
+    return named[named.length - 1];
+  };
+  const getMethod = () => (changed === 'created' ? lastByName() : findExisting() || lastByName()) as MethodNode;
+
+  const mappedParamDecos: Record<string, DecoratorNode> = {};
   let hasPassthrough = false;
-  for (const param of params) {
-    const decos = param.getDecorators();
-    for (const deco of decos) {
-      mappedParamDecos[deco.getName()] = deco;
-      hasPassthrough ||= !!(deco.getArguments() as ObjectLiteralExpression[])?.find(
-        (a) => (a.getProperty('passthrough')?.getStructure() as PropertyAssignmentStructure)?.initializer === 'true',
+  for (const param of getParameters(getMethod())) {
+    for (const deco of getDecorators(param)) {
+      mappedParamDecos[getDecoratorName(deco)] = deco;
+      hasPassthrough ||= !!getDecoratorArguments(deco).find(
+        (a) => isObjectLiteral(a) && getPropertyInitializerText(a, 'passthrough') === 'true',
       );
     }
   }
@@ -311,17 +324,14 @@ const assertMethod = (
   }
 
   // TODO: map to { [parmaname]: { [decoratorname]: decorator } }
-  if (applyDecoratorChanges(existing.getDecorators() || [], method.decorators, existing, imports)) {
+  if (applyDecoratorChanges(source, getMethod, method.decorators, imports)) {
     changed ||= 'changed';
   }
-  if (applyParameterChanges(existing.getParameters() || [], method.methodParams, existing, imports)) {
+  if (applyParameterChanges(source, getMethod, method.methodParams, imports)) {
     changed ||= 'changed';
   }
 
-  const retType = existing
-    .getReturnTypeNode()
-    ?.getText()
-    ?.replace(/^Promise<(.*)>$/, (_, x) => x);
+  const retType = getReturnTypeText(getMethod())?.replace(/^Promise<(.*)>$/, (_, x) => x);
 
   const returnArray = !!method.returnType?.array;
   const allowedTypes = returnArray
@@ -333,10 +343,10 @@ const assertMethod = (
 
   // if @Res / @Response decorator present (without { passthrough: true }), we skip this type enforcement
   if (!responseHandledManually && !((retType || '') in allowedTypes)) {
-    existing.setReturnType(`Promise<${method.returnType?.name}${returnArray ? '[]' : ''}>`);
+    setReturnType(source, getMethod(), `Promise<${method.returnType?.name}${returnArray ? '[]' : ''}>`);
 
     if (!config.stubService) {
-      existing.setIsAsync(true);
+      setIsAsync(source, getMethod());
     }
 
     if (method.returnType?.importFrom) {
@@ -349,37 +359,28 @@ const assertMethod = (
     addImport(imports, importFrom, name);
   }
 
-  return { changed, method: existing };
+  return changed;
 };
 
-export const createProject = () =>
-  new Project({
-    manipulationSettings: {
-      indentationText: IndentationText.TwoSpaces,
-      quoteKind: QuoteKind.Single,
-    },
-  });
-
 export const modifyOpIdDecorator = async (
-  project: Project,
+  project: TsProject,
   opIdDecoratorPath: string,
   opIds: string[],
 ): Promise<Modification> => {
-  project.addSourceFileAtPath(opIdDecoratorPath);
-  const decoratorSource = project.getSourceFile(opIdDecoratorPath);
+  const decoratorSource = await addSourceFileAtPath(project, opIdDecoratorPath);
 
   const sorted = opIds.slice().sort();
   const opIdType = formatOpidType(sorted, '');
 
-  const typeAlias = decoratorSource?.getTypeAlias('OperationId');
+  const typeAlias = getTypeAlias(decoratorSource, 'OperationId');
   if (!typeAlias) {
-    decoratorSource?.addTypeAlias({ name: 'OperationId', type: opIdType, isExported: true });
+    addTypeAlias(decoratorSource, { name: 'OperationId', type: opIdType });
 
     return { changed: true };
   }
 
   const desired = `,${sorted.join(',')}`;
-  const existing = (typeAlias.getStructure().type as string)
+  const existing = getTypeAliasType(typeAlias)
     ?.split(/['" |\n]+/)
     .sort()
     .reduce((all, opid) => (opid ? `${all},${opid}` : all));
@@ -387,44 +388,44 @@ export const modifyOpIdDecorator = async (
     return { changed: false };
   }
 
-  typeAlias.setType(opIdType.replace(/^\n+/, ''));
+  setTypeAliasType(decoratorSource, typeAlias, opIdType.replace(/^\n+/, ''));
 
   return { changed: true };
 };
 
 export const modifyController = async (
-  project: Project,
+  project: TsProject,
   typegenModule: Module,
   controllerPath: string,
 ): Promise<Modification & { serviceMethods: Method[] }> => {
   let changed = false;
 
-  project.addSourceFileAtPath(controllerPath);
-  const controllerSource = project.getSourceFile(controllerPath);
-  const imports = getImportMap(controllerSource?.getImportDeclarations() || []);
+  const controllerSource = await addSourceFileAtPath(project, controllerPath);
+  const imports = getImportMap(getImportDeclarations(controllerSource));
 
-  const ctrl = assertClass(controllerSource, `${typegenModule.controller.name}Controller`);
-  changed = applyDecoratorChanges(ctrl.getDecorators() || [], typegenModule.controller.decorators, ctrl, imports) || changed;
+  const getCtrl = assertClass(controllerSource, `${typegenModule.controller.name}Controller`);
+  changed = applyDecoratorChanges(controllerSource, getCtrl, typegenModule.controller.decorators, imports) || changed;
 
-  const existingMethods: Record<string, MethodDeclaration> = {};
-  for (const method of ctrl.getMethods()) {
-    const opid = method.getDecorator('OpId')?.getArguments()[0]?.getText();
-    if (opid) {
-      existingMethods[opid] = method;
-    }
-  }
+  const findByOpId = (opid: string) => () =>
+    getMethods(getCtrl()).find((m) => {
+      const opIdDecorator = getDecorator(m, 'OpId');
+      return opIdDecorator && getDecoratorArguments(opIdDecorator)[0]?.getText() === `'${opid}'`;
+    });
 
   const serviceMethods: Method[] = [];
 
-  const ctor = ctrl.getConstructors()[0] || ctrl.insertConstructor(0, {});
+  const getCtor = () => getConstructors(getCtrl())[0] as CtorNode | undefined;
+  if (!getCtor()) {
+    insertConstructor(controllerSource, getCtrl());
+  }
   const serviceType = `${typegenModule.service.name}Service`;
 
-  const serviceParam = ctor.getParameters()?.find((param) => param.getStructure().type === serviceType);
-  const serviceName = serviceParam?.getName() || `${camelCase(typegenModule.service.name)}Service`;
+  const serviceParam = getParameters(getCtor() as CtorNode).find((param) => getParameterTypeText(param) === serviceType);
+  const serviceName = serviceParam ? getMemberName(serviceParam) : `${camelCase(typegenModule.service.name)}Service`;
 
   for (const method of typegenModule.controller.methods) {
-    const res = assertMethod(ctrl, method, existingMethods[`'${method.opid}'`], imports, serviceName);
-    if (res.changed === null) {
+    const res = assertMethod(controllerSource, getCtrl, method, findByOpId(method.opid), imports, serviceName);
+    if (res === null) {
       continue;
     }
 
@@ -435,28 +436,26 @@ export const modifyController = async (
     }
 
     // if was created new, push method name for service gen
-    if (res.changed === 'created') {
+    if (res === 'created') {
       serviceMethods.push(method);
     }
   }
 
   if (serviceMethods?.length) {
-    const serviceCtor = ctrl.getConstructors()[0] || ctrl.insertConstructor(0, {});
-    const serviceType = `${typegenModule.service.name}Service`;
-
     if (!serviceParam) {
-      serviceCtor.addParameter({ name: serviceName, type: camelCase(serviceName, true), scope: Scope.Private });
+      addParameter(controllerSource, getCtor() as CtorNode, {
+        name: serviceName,
+        type: camelCase(serviceName, true),
+        scope: 'private',
+      });
       addImport(imports, `./${typegenModule.service.fileName.replace('.ts', '')}`, serviceType);
       changed = true;
     }
-
-    if (!serviceCtor.getParameters().length) {
-      serviceCtor.remove();
-    }
   }
 
-  if (!ctor.getParameters().length) {
-    ctor.remove();
+  const ctor = getCtor();
+  if (ctor && !getParameters(ctor).length) {
+    removeMember(controllerSource, ctor);
   }
 
   if (changed) {
@@ -467,21 +466,22 @@ export const modifyController = async (
 };
 
 export const assertInModuleDecorator = (
-  node: ObjectLiteralExpression,
+  source: TsSourceFile,
+  getNode: () => ObjectLiteralNode,
   prop: string,
   inserts: Record<string, string>,
   imports: ImportMap,
 ): boolean => {
-  let arrayItems = node.getProperty(prop)?.getChildrenOfKind(SyntaxKind.ArrayLiteralExpression)[0].getElements();
-  if (!arrayItems) {
-    node.addPropertyAssignment({ name: prop, initializer: '[]' });
-    arrayItems = node.getProperty(prop)?.getChildrenOfKind(SyntaxKind.ArrayLiteralExpression)[0].getElements();
+  const getArrayNode = () => getPropertyArray(getObjectProperty(getNode(), prop));
+
+  if (!getObjectProperty(getNode(), prop)) {
+    addObjectProperty(source, getNode(), prop, '[]');
   }
-  for (const existing of arrayItems || []) {
-    if (existing.isKind(SyntaxKind.Identifier)) {
+  for (const existing of getArrayElements(getArrayNode()!)) {
+    if (isIdentifier(existing)) {
       delete inserts[existing.getText()];
-    } else if (existing.isKind(SyntaxKind.ObjectLiteralExpression)) {
-      const key = existing.getProperty('provide')?.getText();
+    } else if (isObjectLiteral(existing)) {
+      const key = getObjectProperty(existing, 'provide')?.getText();
       if (key) {
         delete inserts[key];
       }
@@ -490,7 +490,7 @@ export const assertInModuleDecorator = (
 
   const remaining = Object.keys(inserts).sort();
   if (remaining?.length) {
-    node.getProperty(prop)?.getChildrenOfKind(SyntaxKind.ArrayLiteralExpression)[0].addElements(remaining);
+    addArrayElements(source, getArrayNode()!, remaining);
     for (const importKey of remaining) {
       addImport(imports, inserts[importKey], importKey);
     }
@@ -502,23 +502,17 @@ export const assertInModuleDecorator = (
 };
 
 export const modifyService = async (
-  project: Project,
+  project: TsProject,
   typegenModule: Module,
   servicePath: string,
   methods: Method[],
 ): Promise<Modification> => {
   let changed = false;
 
-  project.addSourceFileAtPath(servicePath);
-  const serviceSource = project.getSourceFile(servicePath);
-  const imports = getImportMap(serviceSource?.getImportDeclarations() || []);
+  const serviceSource = await addSourceFileAtPath(project, servicePath);
+  const imports = getImportMap(getImportDeclarations(serviceSource));
 
-  const ctrl = assertClass(serviceSource, `${typegenModule.service.name}Service`);
-
-  const existingMethods: Record<string, MethodDeclaration> = {};
-  for (const method of ctrl.getMethods()) {
-    existingMethods[method.getName()] = method;
-  }
+  const getCtrl = assertClass(serviceSource, `${typegenModule.service.name}Service`);
 
   for (const method of methods) {
     const serviceMethod: Method = {
@@ -533,8 +527,9 @@ export const modifyService = async (
       opid: '',
       typegenMethod: method.typegenMethod,
     };
-    const methodAdded = assertMethod(ctrl, serviceMethod, existingMethods[serviceMethod.name], imports, null);
-    if (methodAdded.changed !== null) {
+    const findExisting = () => getMethods(getCtrl()).find((m) => getMemberName(m) === serviceMethod.name);
+    const methodAdded = assertMethod(serviceSource, getCtrl, serviceMethod, findExisting, imports, null);
+    if (methodAdded !== null) {
       changed = true;
     }
   }
@@ -547,19 +542,18 @@ export const modifyService = async (
 };
 
 export const modifyModule = async (
-  project: Project,
+  project: TsProject,
   typegenModule: Module,
   modulePath: string,
   addService: boolean,
 ): Promise<Modification> => {
   let changed = false;
 
-  project.addSourceFileAtPath(modulePath);
-  const moduleSource = project.getSourceFile(modulePath);
-  const imports = getImportMap(moduleSource?.getImportDeclarations() || []);
+  const moduleSource = await addSourceFileAtPath(project, modulePath);
+  const imports = getImportMap(getImportDeclarations(moduleSource));
 
-  const ctrl = assertClass(moduleSource, `${typegenModule.name}Module`);
-  const decorator = ctrl.getDecorators()[0].getArguments()[0] as ObjectLiteralExpression;
+  const getCtrl = assertClass(moduleSource, `${typegenModule.name}Module`);
+  const getDecoratorArg = () => getDecoratorArguments(getDecorators(getCtrl())[0])[0] as ObjectLiteralNode;
 
   const moduleName = `./${dashCase(typegenModule.name)}`;
   const ctrlName = `${typegenModule.name}Controller`;
@@ -568,9 +562,10 @@ export const modifyModule = async (
   const serviceImport = `${moduleName}.service`;
 
   if (addService) {
-    changed = assertInModuleDecorator(decorator, 'providers', { [serviceName]: serviceImport }, imports) || changed;
+    changed =
+      assertInModuleDecorator(moduleSource, getDecoratorArg, 'providers', { [serviceName]: serviceImport }, imports) || changed;
   }
-  changed = assertInModuleDecorator(decorator, 'controllers', { [ctrlName]: ctrlImport }, imports) || changed;
+  changed = assertInModuleDecorator(moduleSource, getDecoratorArg, 'controllers', { [ctrlName]: ctrlImport }, imports) || changed;
 
   if (changed) {
     updateImports(moduleSource, imports);
@@ -580,18 +575,17 @@ export const modifyModule = async (
 };
 
 export const modifyAppModule = async (
-  project: Project,
+  project: TsProject,
   appModulePath: string,
   inserts: Record<string, string>,
 ): Promise<Modification> => {
-  project.addSourceFileAtPath(appModulePath);
-  const moduleSource = project.getSourceFile(appModulePath);
-  const imports = getImportMap(moduleSource?.getImportDeclarations() || []);
+  const moduleSource = await addSourceFileAtPath(project, appModulePath);
+  const imports = getImportMap(getImportDeclarations(moduleSource));
 
-  const ctrl = assertClass(moduleSource, 'AppModule');
-  const decorator = ctrl.getDecorators()[0].getArguments()[0] as ObjectLiteralExpression;
+  const getCtrl = assertClass(moduleSource, 'AppModule');
+  const getDecoratorArg = () => getDecoratorArguments(getDecorators(getCtrl())[0])[0] as ObjectLiteralNode;
 
-  if (assertInModuleDecorator(decorator, 'imports', inserts, imports)) {
+  if (assertInModuleDecorator(moduleSource, getDecoratorArg, 'imports', inserts, imports)) {
     updateImports(moduleSource, imports);
 
     return { changed: true };

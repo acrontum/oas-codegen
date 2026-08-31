@@ -1,22 +1,14 @@
 import { dirname, join, relative } from 'path';
-import { Project } from 'ts-morph';
-import {
-  createProject,
-  Modification,
-  modifyAppModule,
-  modifyController,
-  modifyModule,
-  modifyOpIdDecorator,
-  modifyService,
-} from './ast-parsing';
+import { Modification, modifyAppModule, modifyController, modifyModule, modifyOpIdDecorator, modifyService } from './ast-parsing';
 import { Config } from './config';
 import { assertFileFromTemplate, exists } from './file-utils';
 import { getTypesToGen, Method, Module } from './parse-typegen';
 import { getController, getModule, getOpIdDecorator, getService } from './templates';
+import { createProject, createSourceFile, getFullText, getSourceFile, saveProject, TsProject } from './ts-ast';
 
 type Change = { summary: 'created' | 'changed' | null; path: string };
 type Details<T = Module> = {
-  project: Project;
+  project: TsProject;
   config: Config;
   module: T;
 };
@@ -49,7 +41,7 @@ const assertProjectFile = async <T extends Modification>(
   }
 
   if (config.dryRun && !(await exists(filePath))) {
-    project.createSourceFile(filePath, content);
+    createSourceFile(project, filePath, content);
   }
 
   const result = await getResult();
@@ -121,7 +113,7 @@ const assertAppModule = async (
 };
 
 const generateModule = async (
-  project: Project,
+  project: TsProject,
   mod: Module,
   config: Config,
   appModuleChanges: Record<string, string>,
@@ -171,7 +163,7 @@ export const generate = async (config: Config) => {
   await assertAppModule(config.appModulePath, { project, config, module: null }, appModuleChanges);
 
   if (Object.keys(changes)?.length && !config.dryRun) {
-    await project.save();
+    await saveProject(project);
   }
 
   const keys = Object.keys(changes);
@@ -183,7 +175,7 @@ export const generate = async (config: Config) => {
     if (changes[key]) {
       console.log(`${colour(changes[key].summary as string)}:  ${key}`);
       if (config.verbose) {
-        console.log(project.getSourceFile(changes[key].path)?.getFullText(), '\n');
+        console.log(getFullText(getSourceFile(project, changes[key].path)), '\n');
       }
     }
   }
@@ -200,3 +192,4 @@ export * from './file-utils';
 export * from './parse-typegen';
 export * from './string-utils';
 export * from './templates';
+export * from './ts-ast';
